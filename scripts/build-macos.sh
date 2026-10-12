@@ -14,6 +14,18 @@ BIN_DIR="$(swift build -c release --show-bin-path)"
 APP="dist/Aire Audio.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Frameworks"
 cp "$BIN_DIR/AireAudio" "$APP/Contents/MacOS/AireAudio"
+ICONSET="$(mktemp -d dist/icon.XXXXXX).iconset"
+mkdir -p "$ICONSET"
+swift scripts/make-icon.swift "$ICONSET/icon_512x512@2x.png"
+for SIZE in 16 32 128 256 512; do
+  sips -z "$SIZE" "$SIZE" "$ICONSET/icon_512x512@2x.png" --out "$ICONSET/icon_${SIZE}x${SIZE}.png" >/dev/null
+  if [[ "$SIZE" != 512 ]]; then
+    DOUBLE=$((SIZE * 2))
+    sips -z "$DOUBLE" "$DOUBLE" "$ICONSET/icon_512x512@2x.png" --out "$ICONSET/icon_${SIZE}x${SIZE}@2x.png" >/dev/null
+  fi
+done
+iconutil -c icns "$ICONSET" -o "$APP/Contents/Resources/AppIcon.icns"
+rm -rf "$ICONSET" "${ICONSET%.iconset}"
 python3 scripts/bundle-ffmpeg.py "$(command -v ffmpeg)" "$APP"
 cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -23,9 +35,10 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <key>CFBundleIdentifier</key><string>app.aireaudio.recorder</string>
 <key>CFBundleName</key><string>Aire Audio</string>
 <key>CFBundleDisplayName</key><string>Aire Audio</string>
+<key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>1.0.0</string>
-<key>CFBundleVersion</key><string>1</string>
+<key>CFBundleShortVersionString</key><string>1.1.0</string>
+<key>CFBundleVersion</key><string>2</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
 <key>NSMicrophoneUsageDescription</key><string>Aire Audio necesita el micrófono para grabar tu voz cuando eliges Micrófono o Sistema + micrófono.</string>

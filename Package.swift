@@ -5,5 +5,8 @@ let package = Package(
     name: "AireAudio",
     platforms: [.macOS(.v13)],
     products: [.executable(name: "AireAudio", targets: ["AireAudio"])],
-    targets: [.executableTarget(name: "AireAudio")]
+    targets: [
+        .executableTarget(name: "AireAudio"),
+        .testTarget(name: "AireAudioTests", dependencies: ["AireAudio"], path: "SwiftTests")
+    ]
 )

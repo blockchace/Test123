@@ -4,6 +4,7 @@ import ScreenCaptureKit
 import CoreMedia
 import SwiftUI
 import UniformTypeIdentifiers
+import Darwin
 
 enum AudioSource: String, CaseIterable, Identifiable {
     case system = "Sistema"
@@ -12,6 +13,11 @@ enum AudioSource: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var needsSystem: Bool { self != .microphone }
     var needsMicrophone: Bool { self != .system }
+}
+
+struct Microphone: Identifiable {
+    let id: String
+    let name: String
 }
 
 struct Recording: Identifiable {
@@ -23,11 +29,11 @@ struct Recording: Identifiable {
     var name: String { url.lastPathComponent }
 }
 
-final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelegate {
+final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
     static let shared = Recorder()
     static let stateChanged = Notification.Name("AireAudioStateChanged")
     enum Phase { case idle, starting, recording, stopping }
-    @Published var source: AudioSource = .system
+    @Published var source: AudioSource = .both
     @Published private(set) var phase: Phase = .idle
     @Published private(set) var paused = false
     @Published private(set) var elapsed: Double = 0
@@ -35,19 +41,35 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
     @Published private(set) var exporting = false
     @Published private(set) var playingID: String?
     @Published var error: String?
+    @Published private(set) var microphones: [Microphone] = []
+    @Published var selectedMicrophoneID = "" {
+        didSet { UserDefaults.standard.set(selectedMicrophoneID, forKey: "selectedMicrophoneID") }
+    }
+    @Published private(set) var systemSpectrum = Array(repeating: Float(0), count: 24)
+    @Published private(set) var microphoneSpectrum = Array(repeating: Float(0), count: 24)
+    @Published private(set) var microphoneReceiving = false
+    @Published private(set) var systemReceiving = false
     var busy: Bool { phase != .idle }
 
     private let audioQueue = DispatchQueue(label: "AireAudio.disk-writer")
+    private let captureQueue = DispatchQueue(label: "AireAudio.microphone-lifecycle")
     private var accepting = false // Accessed only on audioQueue.
     private var files: [String: AVAudioFile] = [:]
     private var frames: [String: Int64] = [:]
     private var session: URL?
     private var writeFailed = false
     private var stream: SCStream?
-    private var engine: AVAudioEngine?
+    private var microphoneSession: AVCaptureSession?
+    private var microphoneRuntimeObserver: NSObjectProtocol?
+    private var spectra: [String: [Float]] = [:]
+    private var lastAudio: [String: TimeInterval] = [:]
+    private var lastSpectrum: [String: TimeInterval] = [:]
     private var timer: Timer?
-    private var player: AVAudioPlayer?
-    private var playerTimer: Timer?
+    private var playbackEngine: AVAudioEngine?
+    private var playbackNodes: [AVAudioPlayerNode] = []
+    private var playbackFiles: [AVAudioFile] = []
+    private var playbackToken = UUID()
+    private var pendingPlaybackTracks = 0
     private var resumeAfterSleep = false
     private var activity: NSObjectProtocol?
     private let library: URL
@@ -56,11 +78,54 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
         library = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("AireAudio/Grabaciones", isDirectory: true)
         super.init()
+        selectedMicrophoneID = UserDefaults.standard.string(forKey: "selectedMicrophoneID") ?? ""
         do { try FileManager.default.createDirectory(at: library, withIntermediateDirectories: true) }
         catch { self.error = error.localizedDescription }
         reload()
+        refreshMicrophones()
+        NotificationCenter.default.addObserver(self, selector: #selector(devicesChanged), name: AVCaptureDevice.wasConnectedNotification, object: nil)
+        NotificationCenter.default.addObserver(self, selector: #selector(devicesChanged), name: AVCaptureDevice.wasDisconnectedNotification, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(willSleep), name: NSWorkspace.willSleepNotification, object: nil)
         NSWorkspace.shared.notificationCenter.addObserver(self, selector: #selector(didWake), name: NSWorkspace.didWakeNotification, object: nil)
+    }
+
+    func refreshMicrophones() {
+        let devices = AVCaptureDevice.devices(for: .audio)
+        microphones = devices.map { Microphone(id: $0.uniqueID, name: $0.localizedName) }
+        if !selectedMicrophoneID.isEmpty && !devices.contains(where: { $0.uniqueID == selectedMicrophoneID }) {
+            if busy {
+                error = "El micrófono seleccionado se desconectó. Se guardará lo grabado hasta ahora."
+                stop()
+            } else { selectedMicrophoneID = "" }
+        }
+    }
+
+    @objc private func devicesChanged() {
+        DispatchQueue.main.async { self.refreshMicrophones() }
+    }
+
+    private func configureMicrophone() throws {
+        let device: AVCaptureDevice?
+        if selectedMicrophoneID.isEmpty { device = AVCaptureDevice.default(for: .audio) }
+        else { device = AVCaptureDevice.devices(for: .audio).first { $0.uniqueID == selectedMicrophoneID } }
+        guard let device else { throw AppError("No se encontró el micrófono seleccionado. Actualiza la lista y elige otra entrada.") }
+        let capture = AVCaptureSession()
+        capture.beginConfiguration()
+        defer { capture.commitConfiguration() }
+        let input = try AVCaptureDeviceInput(device: device)
+        guard capture.canAddInput(input) else { throw AppError("No se pudo abrir el micrófono \(device.localizedName).") }
+        capture.addInput(input)
+        let output = AVCaptureAudioDataOutput()
+        output.audioSettings = [AVFormatIDKey: kAudioFormatLinearPCM, AVLinearPCMBitDepthKey: 32, AVLinearPCMIsFloatKey: true, AVLinearPCMIsNonInterleaved: false]
+        output.setSampleBufferDelegate(self, queue: audioQueue)
+        guard capture.canAddOutput(output) else { throw AppError("No se pudo configurar la salida del micrófono.") }
+        capture.addOutput(output)
+        microphoneSession = capture
+        microphoneRuntimeObserver = NotificationCenter.default.addObserver(forName: AVCaptureSession.runtimeErrorNotification, object: capture, queue: .main) { [weak self] notification in
+            let detail = (notification.userInfo?[AVCaptureSessionErrorKey] as? NSError)?.localizedDescription ?? "Error del dispositivo"
+            self?.error = "La captura del micrófono falló: \(detail)"
+            self?.stop()
+        }
     }
 
     private func announce() { NotificationCenter.default.post(name: Self.stateChanged, object: self) }
@@ -96,19 +161,18 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
                     frames.removeAll()
                     accepting = false
                     writeFailed = false
+                    spectra.removeAll()
+                    lastAudio.removeAll()
+                    lastSpectrum.removeAll()
                 }
                 if selected.needsMicrophone {
-                    let e = AVAudioEngine()
-                    let input = e.inputNode
-                    let format = input.outputFormat(forBus: 0)
-                    guard format.sampleRate > 0, format.channelCount > 0 else { throw AppError("No hay un micrófono disponible.") }
-                    input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buffer, _ in
-                        // Copy: the engine reuses tap buffers after this callback returns.
-                        guard let copy = Self.copy(buffer) else { return }
-                        self?.audioQueue.async { self?.write(copy, track: "microfono") }
+                    try configureMicrophone()
+                    if let capture = microphoneSession {
+                        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                            captureQueue.async { capture.startRunning(); continuation.resume() }
+                        }
+                        guard capture.isRunning else { throw AppError("El micrófono no inició la captura. Comprueba los permisos y el dispositivo seleccionado.") }
                     }
-                    engine = e
-                    try e.start()
                 }
                 if let display = content?.displays.first {
                     let config = SCStreamConfiguration()
@@ -158,9 +222,18 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
         timer = nil
         if let activity { ProcessInfo.processInfo.endActivity(activity); self.activity = nil }
         audioQueue.sync { accepting = false }
-        engine?.stop()
-        engine?.inputNode.removeTap(onBus: 0)
-        engine = nil
+        if let observer = microphoneRuntimeObserver { NotificationCenter.default.removeObserver(observer) }
+        microphoneRuntimeObserver = nil
+        if let capture = microphoneSession {
+            microphoneSession = nil
+            await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                captureQueue.async { capture.stopRunning(); continuation.resume() }
+            }
+        }
+        systemSpectrum = Array(repeating: 0, count: 24)
+        microphoneSpectrum = Array(repeating: 0, count: 24)
+        systemReceiving = false
+        microphoneReceiving = false
         if let s = stream {
             stream = nil
             do { try await s.stopCapture() }
@@ -178,21 +251,20 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
     }
 
     private func updateElapsed() {
-        elapsed = audioQueue.sync {
-            files.map { key, file in Double(frames[key, default: 0]) / file.processingFormat.sampleRate }.max() ?? elapsed
+        let snapshot = audioQueue.sync { () -> (Double, [Float], [Float], Bool, Bool) in
+            let now = ProcessInfo.processInfo.systemUptime
+            let systemLive = accepting && now - lastAudio["sistema", default: 0] < 0.6
+            let micLive = accepting && now - lastAudio["microfono", default: 0] < 0.6
+            let empty = Array(repeating: Float(0), count: 24)
+            return (files.map { key, file in Double(frames[key, default: 0]) / file.processingFormat.sampleRate }.max() ?? elapsed,
+                    systemLive ? spectra["sistema"] ?? empty : empty,
+                    micLive ? spectra["microfono"] ?? empty : empty, systemLive, micLive)
         }
-    }
-
-    private static func copy(_ source: AVAudioPCMBuffer) -> AVAudioPCMBuffer? {
-        guard let output = AVAudioPCMBuffer(pcmFormat: source.format, frameCapacity: source.frameLength) else { return nil }
-        output.frameLength = source.frameLength
-        let src = UnsafeMutableAudioBufferListPointer(source.mutableAudioBufferList)
-        let dst = UnsafeMutableAudioBufferListPointer(output.mutableAudioBufferList)
-        for index in 0..<src.count {
-            guard let from = src[index].mData, let to = dst[index].mData else { return nil }
-            memcpy(to, from, Int(src[index].mDataByteSize))
-        }
-        return output
+        elapsed = snapshot.0
+        systemSpectrum = snapshot.1
+        microphoneSpectrum = snapshot.2
+        systemReceiving = snapshot.3
+        microphoneReceiving = snapshot.4
     }
 
     private func write(_ buffer: AVAudioPCMBuffer, track: String) {
@@ -203,6 +275,12 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
             }
             try files[track]?.write(from: buffer)
             frames[track, default: 0] += Int64(buffer.frameLength)
+            let now = ProcessInfo.processInfo.systemUptime
+            lastAudio[track] = now
+            if now - lastSpectrum[track, default: 0] >= 0.1 {
+                spectra[track] = AudioSpectrum.analyze(buffer)
+                lastSpectrum[track] = now
+            }
         } catch {
             accepting = false
             writeFailed = true
@@ -214,7 +292,16 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
     }
 
     func stream(_ stream: SCStream, didOutputSampleBuffer sampleBuffer: CMSampleBuffer, of type: SCStreamOutputType) {
-        guard type == .audio, accepting, sampleBuffer.isValid,
+        guard type == .audio else { return }
+        consume(sampleBuffer, track: "sistema")
+    }
+
+    func captureOutput(_ output: AVCaptureOutput, didOutput sampleBuffer: CMSampleBuffer, from connection: AVCaptureConnection) {
+        consume(sampleBuffer, track: "microfono")
+    }
+
+    private func consume(_ sampleBuffer: CMSampleBuffer, track: String) {
+        guard accepting, sampleBuffer.isValid,
               let description = sampleBuffer.formatDescription else { return }
         let format = AVAudioFormat(cmAudioFormatDescription: description)
         let count = CMSampleBufferGetNumSamples(sampleBuffer)
@@ -223,12 +310,12 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
         let status = CMSampleBufferCopyPCMDataIntoAudioBufferList(sampleBuffer, at: 0, frameCount: Int32(count), into: buffer.mutableAudioBufferList)
         guard status == noErr else {
             DispatchQueue.main.async {
-                self.error = "No se pudo convertir el audio del sistema (\(status))."
+                self.error = "No se pudo convertir el audio de \(track) (\(status))."
                 self.stop()
             }
             return
         }
-        write(buffer, track: "sistema")
+        write(buffer, track: track)
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
@@ -263,16 +350,47 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
     func play(_ recording: Recording) {
         if playingID == recording.id { stopPlayback(); return }
         stopPlayback()
+        let token = UUID()
+        playbackToken = token
         do {
-            player = try AVAudioPlayer(contentsOf: recording.tracks[0])
-            guard player?.play() == true else { throw AppError("No se pudo reproducir la pista.") }
-            playingID = recording.id
-            playerTimer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
-                if self?.player?.isPlaying != true { self?.stopPlayback() }
+            let engine = AVAudioEngine()
+            playbackEngine = engine
+            playbackFiles = try recording.tracks.map { try AVAudioFile(forReading: $0) }
+            pendingPlaybackTracks = playbackFiles.count
+            engine.mainMixerNode.outputVolume = playbackFiles.count > 1 ? 0.5 : 1
+            for file in playbackFiles {
+                let node = AVAudioPlayerNode()
+                engine.attach(node)
+                engine.connect(node, to: engine.mainMixerNode, format: file.processingFormat)
+                playbackNodes.append(node)
+                node.scheduleFile(file, at: nil, completionCallbackType: .dataPlayedBack) { [weak self] _ in
+                    DispatchQueue.main.async {
+                        guard let self, self.playbackToken == token else { return }
+                        self.pendingPlaybackTracks -= 1
+                        if self.pendingPlaybackTracks == 0 { self.stopPlayback() }
+                    }
+                }
             }
-        } catch { self.error = error.localizedDescription }
+            engine.prepare()
+            try engine.start()
+            let start = AVAudioTime(hostTime: mach_absolute_time() + AVAudioTime.hostTime(forSeconds: 0.1))
+            for node in playbackNodes { node.play(at: start) }
+            playingID = recording.id
+        } catch {
+            stopPlayback()
+            self.error = error.localizedDescription
+        }
     }
-    func stopPlayback() { player?.stop(); player = nil; playingID = nil; playerTimer?.invalidate(); playerTimer = nil }
+    func stopPlayback() {
+        playbackToken = UUID()
+        for node in playbackNodes { node.stop() }
+        playbackEngine?.stop()
+        playbackNodes.removeAll()
+        playbackFiles.removeAll()
+        playbackEngine = nil
+        pendingPlaybackTracks = 0
+        playingID = nil
+    }
 
     func export(_ recording: Recording) {
         guard !exporting else { return }

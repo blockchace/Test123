@@ -18,6 +18,8 @@ jobs:
         run: brew install ffmpeg
       - name: Verificar empaquetador y exportación
         run: python3 -m unittest discover -s Tests -v
+      - name: Comprobar espectro y compilar Swift
+        run: swift test
       - name: Compilar y crear DMG
         run: bash scripts/build-macos.sh
       - name: Guardar instalador

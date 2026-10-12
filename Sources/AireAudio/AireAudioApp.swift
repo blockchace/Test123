@@ -50,7 +50,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshMenu() {
         let model = Recorder.shared
-        item?.button?.image = NSImage(systemSymbolName: model.busy ? "record.circle.fill" : "waveform", accessibilityDescription: "Aire Audio")
+        item?.button?.image = NSImage(systemSymbolName: model.busy ? "record.circle.fill" : "mic.fill", accessibilityDescription: "Aire Audio")
         item?.button?.contentTintColor = model.busy ? .systemRed : nil
         item?.button?.title = model.busy ? (model.paused ? " Pausa" : " REC") : ""
         let menu = NSMenu()
