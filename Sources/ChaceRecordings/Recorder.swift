@@ -48,6 +48,7 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
     let monitor = AudioMonitor()
     @Published private(set) var library: URL
     var busy: Bool { phase != .idle }
+    var transcriptionActive = false
 
     private let audioQueue = DispatchQueue(label: "ChaceRecordings.disk-writer")
     private let captureQueue = DispatchQueue(label: "ChaceRecordings.microphone-lifecycle")

@@ -40,6 +40,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if Recorder.shared.transcriptionActive {
+            let alert = NSAlert()
+            alert.messageText = "Hay una transcripción en curso"
+            alert.informativeText = "Espera a que termine para guardar el TXT antes de salir."
+            alert.addButton(withTitle: "Volver")
+            alert.runModal()
+            return .terminateCancel
+        }
         guard Recorder.shared.busy else { return .terminateNow }
         let alert = NSAlert()
         alert.messageText = "Hay una grabación en curso"

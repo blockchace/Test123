@@ -2,6 +2,20 @@
 
 Grabador nativo para MacBook Air con macOS 13 Ventura o posterior. Interfaz en español, audio del sistema, micrófono o ambos; controles flotantes y en la barra de menús; pausa/reanudación y exportación local a MP3 de 192 kbps. No graba vídeo ni envía audio a servidores.
 
+### Cambios de la versión 1.4: transcripción con Deepgram
+
+1. Pulsa el **engranaje de Ajustes** en la cabecera. Pega únicamente tu API key de Deepgram y pulsa **Guardar**. La clave queda en el Llavero de macOS, no en preferencias, archivos de audio ni Git. Cada Mac necesita su propia configuración. Al recompilar con firma local, el Llavero puede pedir que autorices de nuevo a la app.
+2. Termina y guarda la grabación. Pulsa **Transcribir** debajo de ella.
+3. Selecciona **Español**, **Inglés** o **Multilingüe**. El modelo siempre es **Nova 3**. Los parámetros enviados son `model=nova-3` y `language=es`, `en` o `multi`.
+4. Pulsa **Transcribir** en el selector. Esto envía el audio a `api.deepgram.com` y consume créditos de tu cuenta. La app no transcribe ni envía audio automáticamente al grabar.
+5. Cuando termine, se abre un **TXT UTF-8** y se muestra en Finder. Queda **dentro de la carpeta de esa grabación**, junto a sus pistas CAF, con nombre `Transcripcion-idioma-fecha-identificador.txt`. Incluye texto y, cuando Deepgram los devuelve, tiempos y hablantes. Cada intento exitoso crea otro TXT sin sobrescribir resultados previos.
+
+Para la transcripción se crea una copia temporal MP3 mono a 16 kHz/64 kbps; las dos pistas se mezclan cuando la grabación contiene sistema y micrófono. Los originales no se modifican. La subida se hace desde un archivo, sin cargar toda la grabación en RAM, y la copia temporal se elimina al finalizar. La app muestra errores de clave, saldo, límite de solicitudes, archivos demasiado grandes o respuestas sin voz. No reintenta automáticamente solicitudes que puedan consumir créditos. No cierres la app durante el proceso; la salida se bloquea hasta que termine. Si hay un error después de que Deepgram haya recibido el audio, es posible que el servicio haya consumido créditos.
+
+La grabación sigue sin un corte de duración impuesto por la app, pero Deepgram tiene sus propios límites de tamaño, idioma/modelo, disponibilidad y tiempo de procesamiento. La operación de transcripción tiene un plazo de red de hasta dos horas. Requiere Internet, una clave con permisos y saldo válido. Nova 3 multilingüe permite conversaciones con idiomas alternados; no es la opción `detect_language`.
+
+**Validación:** se han comprobado localmente la sintaxis Swift y las pruebas existentes de mezcla/exportación y empaquetado. Las pruebas Swift del workflow comprueban la URL para los tres idiomas, el modelo, la lectura del texto y hablantes, respuestas vacías y errores HTTP. No se ha realizado una petición real a Deepgram ni una prueba del Llavero en esta máquina Linux, y no se han gastado créditos. La documentación oficial de Deepgram no estuvo accesible desde la red de esta sesión. Comprueba la integración en tu Mac con una conversación corta y revisa el consumo en Deepgram antes de enviar grabaciones largas.
+
 ### Cambios de la versión 1.3
 
 - Nuevo nombre de app, ejecutable, proyecto Swift y DMG: **ChaceRecordings**. Se conserva `app.aireaudio.recorder` como identificador interno para mantener preferencias y continuidad de permisos. El repositorio sigue siendo `blockchace/Test123`.

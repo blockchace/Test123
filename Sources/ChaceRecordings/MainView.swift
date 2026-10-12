@@ -1,7 +1,10 @@
 import SwiftUI
 
-struct MainView: View {
+@MainActor struct MainView: View {
     @ObservedObject var model: Recorder
+    @StateObject private var transcriber = Transcriber()
+    @State private var settingsPresented = false
+    @State private var transcriptionTarget: Recording?
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -12,6 +15,8 @@ struct MainView: View {
                         Text("ChaceRecordings").font(.headline)
                     }
                     Spacer()
+                    Button { settingsPresented = true } label: { Image(systemName: "gearshape") }
+                        .help("Ajustes de Deepgram").disabled(transcriber.busy)
                 }
                 VStack(spacing: 10) {
                     Picker("Fuente de audio", selection: $model.source) {
@@ -56,7 +61,7 @@ struct MainView: View {
                         .help(model.library.path)
                     Spacer(minLength: 4)
                     Button("Cambiar carpeta") { model.chooseRecordingFolder() }
-                        .disabled(model.busy || model.exporting)
+                        .disabled(model.busy || model.exporting || transcriber.busy)
                 }
                 .font(.caption)
                 .padding(.horizontal, 4)
@@ -73,22 +78,37 @@ struct MainView: View {
                 } else {
                     LazyVStack(spacing: 6) {
                         ForEach(model.recordings) { recording in
-                            HStack(spacing: 8) {
-                                Button { model.play(recording) } label: {
-                                    Image(systemName: model.playingID == recording.id ? "stop.circle.fill" : "play.circle.fill").font(.title3)
-                                }.buttonStyle(.plain).disabled(model.busy)
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(recording.name).font(.caption.bold()).lineLimit(1).help(recording.name)
-                                    Text("\(clock(recording.duration)) · \(recording.tracks.count == 2 ? "Sistema + micrófono" : recording.tracks[0].deletingPathExtension().lastPathComponent.capitalized)")
-                                        .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                            VStack(alignment: .leading, spacing: 6) {
+                                HStack(spacing: 8) {
+                                    Button { model.play(recording) } label: {
+                                        Image(systemName: model.playingID == recording.id ? "stop.circle.fill" : "play.circle.fill").font(.title3)
+                                    }.buttonStyle(.plain).disabled(model.busy)
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(recording.name).font(.caption.bold()).lineLimit(1).help(recording.name)
+                                        Text("\(clock(recording.duration)) · \(recording.tracks.count == 2 ? "Sistema + micrófono" : recording.tracks[0].deletingPathExtension().lastPathComponent.capitalized)")
+                                            .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                                    }
+                                    .layoutPriority(1)
+                                    Spacer()
+                                    Button { model.rename(recording) } label: { Image(systemName: "pencil") }
+                                        .help("Cambiar nombre de la grabación").disabled(model.busy || model.exporting || transcriber.busy)
+                                    Button { model.reveal(recording) } label: { Image(systemName: "folder") }
+                                        .help("Mostrar pistas originales en Finder")
+                                    Button("MP3") { model.export(recording) }.disabled(model.exporting).help("Exportar grabación a MP3")
                                 }
-                                .layoutPriority(1)
-                                Spacer()
-                                Button { model.rename(recording) } label: { Image(systemName: "pencil") }
-                                    .help("Cambiar nombre de la grabación").disabled(model.busy || model.exporting)
-                                Button { model.reveal(recording) } label: { Image(systemName: "folder") }
-                                    .help("Mostrar pistas originales en Finder")
-                                Button("MP3") { model.export(recording) }.disabled(model.exporting).help("Exportar grabación a MP3")
+                                HStack(spacing: 6) {
+                                    if transcriber.recordingID == recording.id {
+                                        ProgressView().controlSize(.small)
+                                        Text(transcriber.status).font(.caption).foregroundStyle(.secondary)
+                                    } else {
+                                        Button { transcriptionTarget = recording } label: {
+                                            Label("Transcribir", systemImage: "text.bubble")
+                                        }
+                                        .controlSize(.small)
+                                        .disabled(model.busy || model.exporting || transcriber.busy)
+                                    }
+                                    Spacer(minLength: 0)
+                                }
                             }
                             .padding(8)
                             .modifier(GlassCard())
@@ -103,9 +123,17 @@ struct MainView: View {
         }
         .background(GlassBackground().ignoresSafeArea())
         .scrollIndicators(.visible)
-        .alert("ChaceRecordings", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
-            Button("Aceptar") { model.error = nil }
-        } message: { Text(model.error ?? "") }
+        .sheet(isPresented: $settingsPresented) {
+            DeepgramSettingsView { transcriber.refreshKeyStatus() }
+        }
+        .sheet(item: $transcriptionTarget) { recording in
+            TranscriptionOptionsView(recording: recording, hasKey: transcriber.hasKey) { language in
+                transcriber.start(recording, language: language)
+            }
+        }
+        .alert("ChaceRecordings", isPresented: Binding(get: { model.error != nil || transcriber.error != nil }, set: { if !$0 { model.error = nil; transcriber.error = nil } })) {
+            Button("Aceptar") { model.error = nil; transcriber.error = nil }
+        } message: { Text(model.error ?? transcriber.error ?? "") }
     }
 
     private var recordingTime: some View {
