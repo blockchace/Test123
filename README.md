@@ -1,6 +1,30 @@
-# Aire Audio
+# ChaceRecordings
 
 Grabador nativo para MacBook Air con macOS 13 Ventura o posterior. Interfaz en español, audio del sistema, micrófono o ambos; controles flotantes y en la barra de menús; pausa/reanudación y exportación local a MP3 de 192 kbps. No graba vídeo ni envía audio a servidores.
+
+### Cambios de la versión 1.3
+
+- Nuevo nombre de app, ejecutable, proyecto Swift y DMG: **ChaceRecordings**. Se conserva `app.aireaudio.recorder` como identificador interno para mantener preferencias y continuidad de permisos. El repositorio sigue siendo `blockchace/Test123`.
+- **Cambiar carpeta** permite elegir dónde se guardan las pistas originales y recuerda la elección al reiniciar. Las grabaciones existentes no se mueven: la biblioteca sigue mostrando las carpetas anteriores. Si un disco externo no está disponible o la carpeta no permite escribir, se informa del error; no se cambia el destino en silencio.
+- Botón de **lápiz** para poner nombre a una grabación. El nombre queda guardado y se propone al exportar a MP3. Se guarda como metadato en `recording.json`, sin renombrar ni alterar las pistas originales.
+- Dos formas de onda con **64 líneas verticales centradas**, una por entrada, que muestran el historial reciente de amplitud a un máximo de **30 actualizaciones por segundo**. Responden al audio realmente guardado; no son un espectro de frecuencias. El historial visual se limita a unos dos segundos y nunca aumenta con la duración de la grabación.
+- Ventana con material translúcido nativo de macOS, tarjetas suaves y compatibilidad con modo oscuro y Reducir transparencia. Se elimina la frase “Sin límite” de la interfaz; sigue sin existir un corte de duración.
+
+Para actualizar, cierra y guarda cualquier grabación de la versión anterior. Instala **ChaceRecordings.app** y elimina solo la antigua app **Aire Audio.app** de Aplicaciones para evitar abrir dos versiones con el mismo identificador. No borres sus carpetas de audio. Las pistas antiguas se siguen leyendo desde `~/Library/Application Support/AireAudio/Grabaciones` hasta que elijas otro destino. Si macOS vuelve a pedir permisos después de compilar con firma ad hoc, autoriza la nueva app. El nombre visible nuevo no garantiza continuidad de permisos con una firma nueva.
+
+### Rendimiento y medición de RAM
+
+La ventana utiliza un solo `NSVisualEffectView` detrás del contenido y dos `Canvas` para todas las barras. No usa WebView, imágenes de fondo, sombras animadas ni un temporizador de animación en reposo. El muestreo visual se detiene al pausar o finalizar; el contador y la biblioteca no se actualizan a 30 Hz. Los dos historiales contienen solo 128 valores Float, no todo el audio. Las pistas continúan escribiéndose en disco.
+
+Estas decisiones limitan el trabajo y los buffers del diseño, pero **no se ha medido la RAM real de esta versión en Linux**. El workflow de macOS ejecuta una medición de RSS de la ventana en reposo, con un presupuesto de comprobación de 256 MiB y un artefacto `ChaceRecordings-memory-report`. Es un umbral de detección de regresiones, no una promesa de consumo. RSS del proceso no incluye toda la memoria GPU/WindowServer.
+
+Puedes ejecutar la medición en tu Mac después de compilar, cerrando primero cualquier otra instancia:
+
+```bash
+python3 scripts/profile-memory-macos.py
+```
+
+El script abre su propia instancia, mide 15 segundos y la cierra; no detiene apps ajenas. El resultado queda en `dist/memory-report.json`. Para verificar el uso real durante la captura, observa **ChaceRecordings** en Monitor de Actividad durante unos minutos en reposo, grabando ambas entradas y en pausa. Comprueba también que la RAM no crezca de forma sostenida con una grabación larga. La captura con permisos, la apariencia final y ese consumo activo necesitan comprobación en tu Mac.
 
 ### Cambios de la versión 1.2
 
@@ -30,10 +54,10 @@ Necesitas las herramientas de desarrollo de Apple y FFmpeg para **construir** el
    bash scripts/build-macos.sh
    ```
 
-4. Abre `dist/Aire Audio.dmg` y arrastra **Aire Audio** a **Aplicaciones**.
+4. Abre `dist/ChaceRecordings.dmg` y arrastra **ChaceRecordings** a **Aplicaciones**.
 5. Abre la app. La compilación local lleva firma ad hoc, sin notarización de Apple. Si macOS bloquea su apertura, usa Ajustes del Sistema → Privacidad y seguridad → Abrir igualmente, solo para tu propia compilación.
 
-El script genera una app para la arquitectura del Mac donde lo ejecutes (Apple Silicon o Intel). Para distribuir públicamente hacen falta firma Developer ID, revisión de licencias de FFmpeg/bibliotecas y notarización. `AIRE_SIGN_IDENTITY` permite indicar una identidad de firma, pero el script no realiza notarización.
+El script genera una app para la arquitectura del Mac donde lo ejecutes (Apple Silicon o Intel). Para distribuir públicamente hacen falta firma Developer ID, revisión de licencias de FFmpeg/bibliotecas y notarización. `CHACE_SIGN_IDENTITY` permite indicar una identidad de firma, pero el script no realiza notarización.
 
 También hay un workflow de GitHub Actions para compilar en macOS y entregar el DMG de Apple Silicon como artefacto. Se ejecutará al subir los archivos a `main` o manualmente desde Actions → Crear instalador macOS. No se ha ejecutado en esta sesión.
 
@@ -46,20 +70,21 @@ También hay un workflow de GitHub Actions para compilar en macOS y entregar el 
 - Pulsa **Exportar MP3** para elegir nombre y carpeta. En modo combinado se mezclan ambas pistas con normalización; no hay controles de volumen independientes en esta versión.
 - La reproducción de una grabación combinada y el MP3 exportado contienen ambas pistas.
 
-Las pistas originales están en `~/Library/Application Support/AireAudio/Grabaciones`. El botón de carpeta las muestra en Finder. Se conservan después de exportar. El contenido protegido por DRM puede impedir la captura. No hay promesa de sincronización de precisión de estudio entre dos dispositivos/relojes independientes.
+Las pistas originales están en la carpeta elegida. Por compatibilidad, el destino inicial sigue siendo `~/Library/Application Support/AireAudio/Grabaciones`. El botón de carpeta las muestra en Finder. Se conservan después de exportar. El contenido protegido por DRM puede impedir la captura. No hay promesa de sincronización de precisión de estudio entre dos dispositivos/relojes independientes.
 
 ## Estado de verificación
 
 El entorno de desarrollo utilizado es Linux, sin SDK macOS ni Xcode: **la compilación Swift y la captura en un Mac están pendientes**. No se entrega un DMG ya compilado. Se han comprobado aquí el empaquetador mediante pruebas, la sintaxis del script y el flujo FFmpeg de mezcla/exportación con pistas de prueba. El script de macOS compila Swift, empaqueta las bibliotecas, comprueba la firma y genera un MP3 de prueba antes de crear el DMG.
 
-Para la versión 1.1 se comprobó además la sintaxis de los archivos Swift con un parser. Esto no comprueba los tipos ni sustituye la compilación. El workflow ejecuta `swift test`: pruebas de silencio, picos de frecuencia, amplitud, canales estéreo con fase opuesta y buffers intercalados cortos. Estas pruebas Swift y la captura del micrófono físico requieren macOS y no se ejecutaron localmente en Linux.
+Para las versiones recientes se comprobó además la sintaxis de los archivos Swift con un parser. Esto no comprueba los tipos ni sustituye la compilación. El workflow ejecuta `swift test`: pruebas de amplitud de audio, canales estéreo con fase opuesta, buffers intercalados, historial visual acotado y persistencia de nombres. Estas pruebas Swift y la captura del micrófono físico requieren macOS y no se ejecutaron localmente en Linux.
 
 Pruebas de aceptación en tu Mac antes de usarlo para una grabación importante:
 
 1. Graba 20 segundos del sistema mientras reproduces un sonido; pausa 5 segundos y reanuda 10. El audio debe durar aproximadamente 30 segundos, sin incluir la pausa.
-2. Repite con micrófono y con ambas fuentes. Exporta y reproduce el MP3 combinado para comprobar las dos pistas.
-   Elige explícitamente el micrófono integrado, después uno externo si está disponible. Comprueba que cada espectro responde solo a su pista, se vacía al pausar y muestra silencio cuando llegan datos sin sonido. Reduce la ventana y recorre toda la biblioteca con la barra de desplazamiento. Verifica el icono de micrófono en Finder y Dock.
-3. Cierra la ventana y pausa/detén desde el panel flotante y desde el menú REC.
-4. Reinicia la app y confirma que conserva la biblioteca y exporta de nuevo.
-5. Prueba permisos denegados, desconexión del micrófono y suspensión/reanudación. Comprueba que los errores preserven las pistas ya guardadas.
-6. Haz una grabación prolongada con suficiente espacio y verifica duración y reproducción. La ausencia de un temporizador de corte no sustituye esta prueba de estabilidad.
+2. Cambia el destino a una carpeta de prueba, graba, reinicia y verifica que lo recuerde. Pon un nombre con el lápiz, reinicia y confirma que se conserve y se proponga al exportar. Comprueba que las pistas antiguas sigan visibles y que se informe de una carpeta inaccesible.
+3. Repite con micrófono y con ambas fuentes. Exporta y reproduce el MP3 combinado para comprobar las dos pistas.
+   Elige explícitamente el micrófono integrado, después uno externo si está disponible. Comprueba que cada espectro responde solo a su pista, se vacía al pausar y muestra silencio cuando llegan datos sin sonido. Reduce la ventana y recorre toda la biblioteca con la barra de desplazamiento. Verifica el icono de micrófono en Finder y Dock, la transparencia en claro/oscuro y la opción Reducir transparencia.
+4. Cierra la ventana y pausa/detén desde el panel flotante y desde el menú REC.
+5. Reinicia la app y confirma que conserva la biblioteca y exporta de nuevo.
+6. Prueba permisos denegados, desconexión del micrófono y suspensión/reanudación. Comprueba que los errores preserven las pistas ya guardadas.
+7. Haz una grabación prolongada con suficiente espacio y verifica duración y reproducción. La ausencia de un temporizador de corte no sustituye esta prueba de estabilidad.

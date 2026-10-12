@@ -22,16 +22,16 @@ struct Microphone: Identifiable {
 
 struct Recording: Identifiable {
     let url: URL
+    let name: String
     let date: Date
     let duration: Double
     let tracks: [URL]
     var id: String { url.path }
-    var name: String { url.lastPathComponent }
 }
 
 final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelegate, AVCaptureAudioDataOutputSampleBufferDelegate {
     static let shared = Recorder()
-    static let stateChanged = Notification.Name("AireAudioStateChanged")
+    static let stateChanged = Notification.Name("ChaceRecordingsStateChanged")
     enum Phase { case idle, starting, recording, stopping }
     @Published var source: AudioSource = .both
     @Published private(set) var phase: Phase = .idle
@@ -45,14 +45,12 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
     @Published var selectedMicrophoneID = "" {
         didSet { UserDefaults.standard.set(selectedMicrophoneID, forKey: "selectedMicrophoneID") }
     }
-    @Published private(set) var systemSpectrum = Array(repeating: Float(0), count: 24)
-    @Published private(set) var microphoneSpectrum = Array(repeating: Float(0), count: 24)
-    @Published private(set) var microphoneReceiving = false
-    @Published private(set) var systemReceiving = false
+    let monitor = AudioMonitor()
+    @Published private(set) var library: URL
     var busy: Bool { phase != .idle }
 
-    private let audioQueue = DispatchQueue(label: "AireAudio.disk-writer")
-    private let captureQueue = DispatchQueue(label: "AireAudio.microphone-lifecycle")
+    private let audioQueue = DispatchQueue(label: "ChaceRecordings.disk-writer")
+    private let captureQueue = DispatchQueue(label: "ChaceRecordings.microphone-lifecycle")
     private var accepting = false // Accessed only on audioQueue.
     private var files: [String: AVAudioFile] = [:]
     private var frames: [String: Int64] = [:]
@@ -61,9 +59,9 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
     private var stream: SCStream?
     private var microphoneSession: AVCaptureSession?
     private var microphoneRuntimeObserver: NSObjectProtocol?
-    private var spectra: [String: [Float]] = [:]
+    private var waveforms: [String: WaveformHistory] = [:]
+    private var pendingPeaks: [String: Float] = [:]
     private var lastAudio: [String: TimeInterval] = [:]
-    private var lastSpectrum: [String: TimeInterval] = [:]
     private var timer: Timer?
     private var playbackEngine: AVAudioEngine?
     private var playbackNodes: [AVAudioPlayerNode] = []
@@ -72,15 +70,16 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
     private var pendingPlaybackTracks = 0
     private var resumeAfterSleep = false
     private var activity: NSObjectProtocol?
-    private let library: URL
 
     override init() {
-        library = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+        let legacy = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("AireAudio/Grabaciones", isDirectory: true)
+        library = UserDefaults.standard.string(forKey: "recordingDirectory").map { URL(fileURLWithPath: $0, isDirectory: true) } ?? legacy
         super.init()
         selectedMicrophoneID = UserDefaults.standard.string(forKey: "selectedMicrophoneID") ?? ""
         do { try FileManager.default.createDirectory(at: library, withIntermediateDirectories: true) }
         catch { self.error = error.localizedDescription }
+        registerLibrary(library)
         reload()
         refreshMicrophones()
         NotificationCenter.default.addObserver(self, selector: #selector(devicesChanged), name: AVCaptureDevice.wasConnectedNotification, object: nil)
@@ -148,22 +147,23 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
                 var content: SCShareableContent?
                 if selected.needsSystem {
                     do { content = try await SCShareableContent.excludingDesktopWindows(false, onScreenWindowsOnly: true) }
-                    catch { throw AppError("No se pudo acceder al audio del sistema. Autoriza Aire Audio en Ajustes del Sistema → Privacidad y seguridad → Grabación de pantalla (o Pantalla y audio del sistema), y vuelve a abrir la app. Detalle: \(error.localizedDescription)") }
+                    catch { throw AppError("No se pudo acceder al audio del sistema. Autoriza ChaceRecordings en Ajustes del Sistema → Privacidad y seguridad → Grabación de pantalla (o Pantalla y audio del sistema), y vuelve a abrir la app. Detalle: \(error.localizedDescription)") }
                     guard content?.displays.first != nil else { throw AppError("No se encontró una pantalla para la captura del sistema.") }
                 }
                 let formatter = DateFormatter()
                 formatter.dateFormat = "yyyy-MM-dd HH.mm.ss"
                 let folder = library.appendingPathComponent("\(formatter.string(from: Date())) \(UUID().uuidString.prefix(6))", isDirectory: true)
                 try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+                try RecordingStore.rename(in: folder, to: "Grabación \(formatter.string(from: Date()))")
                 audioQueue.sync {
                     session = folder
                     files.removeAll()
                     frames.removeAll()
                     accepting = false
                     writeFailed = false
-                    spectra.removeAll()
+                    waveforms.removeAll()
+                    pendingPeaks.removeAll()
                     lastAudio.removeAll()
-                    lastSpectrum.removeAll()
                 }
                 if selected.needsMicrophone {
                     try configureMicrophone()
@@ -192,7 +192,7 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
                 audioQueue.sync { accepting = true }
                 activity = ProcessInfo.processInfo.beginActivity(options: [.idleSystemSleepDisabled, .userInitiated], reason: "Grabación de audio en curso")
                 phase = .recording
-                timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in self?.updateElapsed() }
+                startMeterTimer()
                 announce()
             } catch {
                 await finishCapture()
@@ -205,7 +205,13 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
         guard phase == .recording else { return }
         paused.toggle()
         audioQueue.sync { accepting = !paused }
-        updateElapsed()
+        if paused {
+            updateElapsed()
+            timer?.invalidate()
+            timer = nil
+            audioQueue.sync { waveforms.removeAll(); pendingPeaks.removeAll() }
+            monitor.clear()
+        } else { startMeterTimer() }
         announce()
     }
 
@@ -230,10 +236,7 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
                 captureQueue.async { capture.stopRunning(); continuation.resume() }
             }
         }
-        systemSpectrum = Array(repeating: 0, count: 24)
-        microphoneSpectrum = Array(repeating: 0, count: 24)
-        systemReceiving = false
-        microphoneReceiving = false
+        monitor.clear()
         if let s = stream {
             stream = nil
             do { try await s.stopCapture() }
@@ -250,21 +253,30 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
         announce()
     }
 
+    private func startMeterTimer() {
+        timer?.invalidate()
+        let timer = Timer(timeInterval: 1.0 / 30.0, repeats: true) { [weak self] _ in self?.updateElapsed() }
+        self.timer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
     private func updateElapsed() {
         let snapshot = audioQueue.sync { () -> (Double, [Float], [Float], Bool, Bool) in
             let now = ProcessInfo.processInfo.systemUptime
-            let systemLive = accepting && now - lastAudio["sistema", default: 0] < 0.6
-            let micLive = accepting && now - lastAudio["microfono", default: 0] < 0.6
-            let empty = Array(repeating: Float(0), count: 24)
+            let systemLive = accepting && now - lastAudio["sistema", default: 0] < 0.3
+            let micLive = accepting && now - lastAudio["microfono", default: 0] < 0.3
+            for key in ["sistema", "microfono"] {
+                var history = waveforms[key] ?? WaveformHistory()
+                history.append(peak: accepting ? pendingPeaks[key, default: 0] : 0)
+                waveforms[key] = history
+                pendingPeaks[key] = 0
+            }
             return (files.map { key, file in Double(frames[key, default: 0]) / file.processingFormat.sampleRate }.max() ?? elapsed,
-                    systemLive ? spectra["sistema"] ?? empty : empty,
-                    micLive ? spectra["microfono"] ?? empty : empty, systemLive, micLive)
+                    waveforms["sistema"]!.values, waveforms["microfono"]!.values, systemLive, micLive)
         }
-        elapsed = snapshot.0
-        systemSpectrum = snapshot.1
-        microphoneSpectrum = snapshot.2
-        systemReceiving = snapshot.3
-        microphoneReceiving = snapshot.4
+        // The library and controls refresh once per second, not on every meter frame.
+        if Int(elapsed) != Int(snapshot.0) { elapsed = snapshot.0 }
+        monitor.update(system: snapshot.1, microphone: snapshot.2, systemReceiving: snapshot.3, microphoneReceiving: snapshot.4)
     }
 
     private func write(_ buffer: AVAudioPCMBuffer, track: String) {
@@ -277,10 +289,7 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
             frames[track, default: 0] += Int64(buffer.frameLength)
             let now = ProcessInfo.processInfo.systemUptime
             lastAudio[track] = now
-            if now - lastSpectrum[track, default: 0] >= 0.1 {
-                spectra[track] = AudioSpectrum.analyze(buffer)
-                lastSpectrum[track] = now
-            }
+            pendingPeaks[track] = max(pendingPeaks[track, default: 0], AudioLevels.peak(buffer))
         } catch {
             accepting = false
             writeFailed = true
@@ -333,8 +342,56 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
         if resumeAfterSleep && phase == .recording && paused { resumeAfterSleep = false; togglePause() }
     }
 
+    private func registerLibrary(_ root: URL) {
+        var paths = UserDefaults.standard.stringArray(forKey: "recordingDirectories") ?? []
+        let legacy = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+            .appendingPathComponent("AireAudio/Grabaciones").path
+        for path in [legacy, root.standardizedFileURL.path] where !paths.contains(path) { paths.append(path) }
+        UserDefaults.standard.set(paths, forKey: "recordingDirectories")
+    }
+
+    func chooseRecordingFolder() {
+        guard !busy, !exporting else { return }
+        let panel = NSOpenPanel()
+        panel.title = "Carpeta para guardar las grabaciones"
+        panel.prompt = "Elegir carpeta"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.canCreateDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.directoryURL = library
+        guard panel.runModal() == .OK, let folder = panel.url else { return }
+        do {
+            try RecordingStore.verifyWritable(folder)
+            stopPlayback()
+            library = folder.standardizedFileURL
+            UserDefaults.standard.set(library.path, forKey: "recordingDirectory")
+            registerLibrary(library)
+            reload()
+        } catch { self.error = "No se puede guardar en esa carpeta: \(error.localizedDescription)" }
+    }
+
+    func rename(_ recording: Recording) {
+        guard !busy, !exporting else { return }
+        let alert = NSAlert()
+        alert.messageText = "Nombre de la grabación"
+        alert.informativeText = "El nombre también se utilizará al exportar a MP3."
+        let field = NSTextField(string: recording.name)
+        field.frame = NSRect(x: 0, y: 0, width: 300, height: 24)
+        alert.accessoryView = field
+        alert.addButton(withTitle: "Guardar nombre")
+        alert.addButton(withTitle: "Cancelar")
+        alert.window.initialFirstResponder = field
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        do { try RecordingStore.rename(in: recording.url, to: field.stringValue); reload() }
+        catch { self.error = error.localizedDescription }
+    }
+
     func reload() {
-        let folders = (try? FileManager.default.contentsOfDirectory(at: library, includingPropertiesForKeys: [.creationDateKey])) ?? []
+        let roots = UserDefaults.standard.stringArray(forKey: "recordingDirectories") ?? [library.path]
+        let folders = Array(Set(roots)).flatMap { path in
+            (try? FileManager.default.contentsOfDirectory(at: URL(fileURLWithPath: path), includingPropertiesForKeys: [.creationDateKey])) ?? []
+        }
         recordings = folders.compactMap { folder in
             let tracks = ["sistema.caf", "microfono.caf"].map { folder.appendingPathComponent($0) }.filter { FileManager.default.fileExists(atPath: $0.path) }
             let durations = tracks.compactMap { url -> Double? in
@@ -342,7 +399,7 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
                 return Double(f.length) / f.processingFormat.sampleRate
             }
             guard let duration = durations.max() else { return nil }
-            return Recording(url: folder, date: (try? folder.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date(), duration: duration, tracks: tracks)
+            return Recording(url: folder, name: RecordingStore.displayName(in: folder), date: (try? folder.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date(), duration: duration, tracks: tracks)
         }.sorted { $0.date > $1.date }
     }
 
@@ -397,6 +454,7 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.mp3]
         panel.nameFieldStringValue = recording.name + ".mp3"
+        panel.directoryURL = recording.url.deletingLastPathComponent()
         panel.title = "Exportar grabación a MP3"
         guard panel.runModal() == .OK, let target = panel.url else { return }
         guard let encoder = Bundle.main.url(forResource: "ffmpeg", withExtension: nil, subdirectory: "bin") else {
@@ -405,8 +463,8 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
         }
         exporting = true
         DispatchQueue.global(qos: .userInitiated).async {
-            let temporary = target.deletingLastPathComponent().appendingPathComponent(".aire-\(UUID().uuidString).mp3")
-            let log = FileManager.default.temporaryDirectory.appendingPathComponent("aire-export-\(UUID().uuidString).log")
+            let temporary = target.deletingLastPathComponent().appendingPathComponent(".chace-\(UUID().uuidString).mp3")
+            let log = FileManager.default.temporaryDirectory.appendingPathComponent("chace-export-\(UUID().uuidString).log")
             defer { try? FileManager.default.removeItem(at: temporary); try? FileManager.default.removeItem(at: log) }
             do {
                 FileManager.default.createFile(atPath: log.path, contents: nil)

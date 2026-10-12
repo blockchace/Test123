@@ -11,9 +11,9 @@ command -v ffmpeg >/dev/null || { echo 'Instala FFmpeg con: brew install ffmpeg'
 ffmpeg -hide_banner -encoders 2>/dev/null | grep libmp3lame >/dev/null || { echo 'FFmpeg necesita el codificador libmp3lame.' >&2; exit 1; }
 swift build -c release
 BIN_DIR="$(swift build -c release --show-bin-path)"
-APP="dist/Aire Audio.app"
+APP="dist/ChaceRecordings.app"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/bin" "$APP/Contents/Frameworks"
-cp "$BIN_DIR/AireAudio" "$APP/Contents/MacOS/AireAudio"
+cp "$BIN_DIR/ChaceRecordings" "$APP/Contents/MacOS/ChaceRecordings"
 ICONSET="$(mktemp -d dist/icon.XXXXXX).iconset"
 mkdir -p "$ICONSET"
 swift scripts/make-icon.swift "$ICONSET/icon_512x512@2x.png"
@@ -31,23 +31,23 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
-<key>CFBundleExecutable</key><string>AireAudio</string>
+<key>CFBundleExecutable</key><string>ChaceRecordings</string>
 <key>CFBundleIdentifier</key><string>app.aireaudio.recorder</string>
-<key>CFBundleName</key><string>Aire Audio</string>
-<key>CFBundleDisplayName</key><string>Aire Audio</string>
+<key>CFBundleName</key><string>ChaceRecordings</string>
+<key>CFBundleDisplayName</key><string>ChaceRecordings</string>
 <key>CFBundleIconFile</key><string>AppIcon</string>
 <key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>1.2.0</string>
-<key>CFBundleVersion</key><string>3</string>
+<key>CFBundleShortVersionString</key><string>1.3.0</string>
+<key>CFBundleVersion</key><string>4</string>
 <key>LSMinimumSystemVersion</key><string>13.0</string>
 <key>NSHighResolutionCapable</key><true/>
-<key>NSMicrophoneUsageDescription</key><string>Aire Audio necesita el micrófono para grabar tu voz cuando eliges Micrófono o Sistema + micrófono.</string>
-<key>NSScreenCaptureUsageDescription</key><string>Aire Audio necesita acceso a la captura del sistema para grabar el sonido de las aplicaciones. No guarda vídeo.</string>
+<key>NSMicrophoneUsageDescription</key><string>ChaceRecordings necesita el micrófono para grabar tu voz cuando eliges Micrófono o Sistema + micrófono.</string>
+<key>NSScreenCaptureUsageDescription</key><string>ChaceRecordings necesita acceso a la captura del sistema para grabar el sonido de las aplicaciones. No guarda vídeo.</string>
 </dict></plist>
 PLIST
 plutil -lint "$APP/Contents/Info.plist"
 # A developer signing identity can be supplied for distribution.
-SIGN_IDENTITY="${AIRE_SIGN_IDENTITY:--}"
+SIGN_IDENTITY="${CHACE_SIGN_IDENTITY:-${AIRE_SIGN_IDENTITY:--}}"
 find "$APP/Contents/Frameworks" -type f -name '*.dylib' -print0 | while IFS= read -r -d '' file; do
   codesign --force --sign "$SIGN_IDENTITY" "$file"
 done
@@ -61,5 +61,5 @@ STAGING="$(mktemp -d dist/dmg-staging.XXXXXX)"
 trap 'rm -rf "$STAGING"' EXIT
 cp -R "$APP" "$STAGING/"
 ln -s /Applications "$STAGING/Applications"
-hdiutil create -ov -volname 'Aire Audio' -srcfolder "$STAGING" -format UDZO 'dist/Aire Audio.dmg'
-echo 'Creado: dist/Aire Audio.dmg. Ábrelo y arrastra Aire Audio a Aplicaciones.'
+hdiutil create -ov -volname 'ChaceRecordings' -srcfolder "$STAGING" -format UDZO 'dist/ChaceRecordings.dmg'
+echo 'Creado: dist/ChaceRecordings.dmg. Ábrelo y arrastra ChaceRecordings a Aplicaciones.'

@@ -2,11 +2,11 @@ import SwiftUI
 import AppKit
 
 @main
-struct AireAudioApp: App {
+struct ChaceRecordingsApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
 
     var body: some Scene {
-        WindowGroup("Aire Audio") {
+        WindowGroup("ChaceRecordings") {
             MainView(model: Recorder.shared)
                 .frame(minWidth: 400, minHeight: 350)
         }
@@ -51,11 +51,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private func refreshMenu() {
         let model = Recorder.shared
-        item?.button?.image = NSImage(systemSymbolName: model.busy ? "record.circle.fill" : "mic.fill", accessibilityDescription: "Aire Audio")
+        item?.button?.image = NSImage(systemSymbolName: model.busy ? "record.circle.fill" : "mic.fill", accessibilityDescription: "ChaceRecordings")
         item?.button?.contentTintColor = model.busy ? .systemRed : nil
         item?.button?.title = model.busy ? (model.paused ? " Pausa" : " REC") : ""
         let menu = NSMenu()
-        let open = NSMenuItem(title: "Mostrar Aire Audio", action: #selector(showApp), keyEquivalent: "")
+        let open = NSMenuItem(title: "Mostrar ChaceRecordings", action: #selector(showApp), keyEquivalent: "")
         open.target = self
         menu.addItem(open)
         if model.busy {

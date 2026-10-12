@@ -9,10 +9,9 @@ struct MainView: View {
                 HStack {
                     Image(systemName: "mic.circle.fill").font(.system(size: 26)).foregroundStyle(.indigo)
                     VStack(alignment: .leading, spacing: 3) {
-                        Text("Aire Audio").font(.headline)
+                        Text("ChaceRecordings").font(.headline)
                     }
                     Spacer()
-                    Text("Sin límite").font(.caption2.bold()).foregroundStyle(.secondary)
                 }
                 VStack(spacing: 10) {
                     Picker("Fuente de audio", selection: $model.source) {
@@ -35,10 +34,7 @@ struct MainView: View {
                                 .font(.caption).foregroundStyle(.orange)
                         }
                     }
-                    VStack(spacing: 8) {
-                        SpectrumView(title: "Sistema", values: model.systemSpectrum, enabled: model.source.needsSystem, receiving: model.systemReceiving, paused: model.paused, recording: model.phase == .recording, color: .indigo)
-                        SpectrumView(title: "Micrófono", values: model.microphoneSpectrum, enabled: model.source.needsMicrophone, receiving: model.microphoneReceiving, paused: model.paused, recording: model.phase == .recording, color: .teal)
-                    }
+                    InputMonitors(monitor: model.monitor, source: model.source, paused: model.paused, recording: model.phase == .recording)
                     ViewThatFits(in: .horizontal) {
                         HStack(spacing: 12) {
                             recordingTime
@@ -53,7 +49,17 @@ struct MainView: View {
                 }
                 .padding(12)
                 .frame(maxWidth: .infinity)
-                .background(.quaternary.opacity(0.4), in: RoundedRectangle(cornerRadius: 12))
+                .modifier(GlassCard())
+                HStack(spacing: 6) {
+                    Image(systemName: "folder").foregroundStyle(.secondary)
+                    Text(model.library.lastPathComponent).lineLimit(1).truncationMode(.middle)
+                        .help(model.library.path)
+                    Spacer(minLength: 4)
+                    Button("Cambiar carpeta") { model.chooseRecordingFolder() }
+                        .disabled(model.busy || model.exporting)
+                }
+                .font(.caption)
+                .padding(.horizontal, 4)
                 HStack {
                     Text("Tus grabaciones").font(.headline)
                     Spacer()
@@ -72,18 +78,20 @@ struct MainView: View {
                                     Image(systemName: model.playingID == recording.id ? "stop.circle.fill" : "play.circle.fill").font(.title3)
                                 }.buttonStyle(.plain).disabled(model.busy)
                                 VStack(alignment: .leading, spacing: 2) {
-                                    Text(recording.date.formatted(date: .abbreviated, time: .shortened)).font(.caption.bold()).lineLimit(1)
+                                    Text(recording.name).font(.caption.bold()).lineLimit(1).help(recording.name)
                                     Text("\(clock(recording.duration)) · \(recording.tracks.count == 2 ? "Sistema + micrófono" : recording.tracks[0].deletingPathExtension().lastPathComponent.capitalized)")
                                         .font(.caption2).foregroundStyle(.secondary).lineLimit(1)
                                 }
                                 .layoutPriority(1)
                                 Spacer()
+                                Button { model.rename(recording) } label: { Image(systemName: "pencil") }
+                                    .help("Cambiar nombre de la grabación").disabled(model.busy || model.exporting)
                                 Button { model.reveal(recording) } label: { Image(systemName: "folder") }
                                     .help("Mostrar pistas originales en Finder")
                                 Button("MP3") { model.export(recording) }.disabled(model.exporting).help("Exportar grabación a MP3")
                             }
                             .padding(8)
-                            .background(.quaternary.opacity(0.3), in: RoundedRectangle(cornerRadius: 12))
+                            .modifier(GlassCard())
                         }
                     }
                     Text("En grabaciones combinadas, la reproducción y el MP3 incluyen sistema y micrófono.")
@@ -93,8 +101,9 @@ struct MainView: View {
             .padding(12)
             .frame(maxWidth: .infinity)
         }
+        .background(GlassBackground().ignoresSafeArea())
         .scrollIndicators(.visible)
-        .alert("Aire Audio", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
+        .alert("ChaceRecordings", isPresented: Binding(get: { model.error != nil }, set: { if !$0 { model.error = nil } })) {
             Button("Aceptar") { model.error = nil }
         } message: { Text(model.error ?? "") }
     }
@@ -161,7 +170,21 @@ struct FloatingControls: View {
     }
 }
 
-struct SpectrumView: View {
+struct InputMonitors: View {
+    @ObservedObject var monitor: AudioMonitor
+    let source: AudioSource
+    let paused: Bool
+    let recording: Bool
+
+    var body: some View {
+        VStack(spacing: 8) {
+            WaveformView(title: "Sistema", values: monitor.system, enabled: source.needsSystem, receiving: monitor.systemReceiving, paused: paused, recording: recording, color: .indigo)
+            WaveformView(title: "Micrófono", values: monitor.microphone, enabled: source.needsMicrophone, receiving: monitor.microphoneReceiving, paused: paused, recording: recording, color: .teal)
+        }
+    }
+}
+
+struct WaveformView: View {
     let title: String
     let values: [Float]
     let enabled: Bool
@@ -175,29 +198,33 @@ struct SpectrumView: View {
         if paused { return "En pausa" }
         if !recording { return "En espera" }
         if !receiving { return "Sin datos de audio" }
-        return (values.max() ?? 0) > 0.08 ? "Audio detectado" : "Silencio / nivel bajo"
+        return (values.suffix(8).max() ?? 0) > 0.08 ? "Audio detectado" : "Silencio / nivel bajo"
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 5) {
             HStack {
                 Text(title).font(.caption.bold())
                 Spacer()
                 Text(status).font(.caption2).foregroundStyle(.secondary)
             }
-            GeometryReader { geometry in
-                HStack(alignment: .bottom, spacing: 3) {
-                    ForEach(values.indices, id: \.self) { index in
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(enabled ? color : .gray.opacity(0.3))
-                            .frame(width: max(1, (geometry.size.width - CGFloat(values.count - 1) * 3) / CGFloat(values.count)), height: max(2, CGFloat(values[index]) * geometry.size.height))
-                    }
-                }.frame(height: geometry.size.height, alignment: .bottom)
-            }.frame(height: 28)
-            HStack { Text("40 Hz"); Spacer(); Text("20 kHz") }
-                .font(.system(size: 9)).foregroundStyle(.secondary)
+            // A single canvas draws all 64 bars: no per-bar views or animation loops.
+            Canvas { context, size in
+                let step = size.width / CGFloat(values.count)
+                let width = max(1, step * 0.55)
+                var bars = Path()
+                for index in values.indices {
+                    let height = max(1, CGFloat(values[index]) * size.height)
+                    let rect = CGRect(x: CGFloat(index) * step + (step - width) / 2,
+                                      y: (size.height - height) / 2, width: width, height: height)
+                    bars.addRoundedRect(in: rect, cornerSize: CGSize(width: width / 2, height: width / 2))
+                }
+                context.fill(bars, with: .color(enabled ? color : .gray.opacity(0.3)))
+            }
+            .frame(height: 34)
+            .accessibilityHidden(true)
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("Espectro de \(title): \(status)")
+        .accessibilityLabel("Audio de \(title): \(status)")
     }
 }

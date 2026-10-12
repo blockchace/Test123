@@ -2,11 +2,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "AireAudio",
+    name: "ChaceRecordings",
     platforms: [.macOS(.v13)],
-    products: [.executable(name: "AireAudio", targets: ["AireAudio"])],
+    products: [.executable(name: "ChaceRecordings", targets: ["ChaceRecordings"])],
     targets: [
-        .executableTarget(name: "AireAudio"),
-        .testTarget(name: "AireAudioTests", dependencies: ["AireAudio"], path: "SwiftTests")
+        .executableTarget(name: "ChaceRecordings"),
+        .testTarget(name: "ChaceRecordingsTests", dependencies: ["ChaceRecordings"], path: "SwiftTests")
     ]
 )
