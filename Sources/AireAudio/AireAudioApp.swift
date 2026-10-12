@@ -8,8 +8,9 @@ struct AireAudioApp: App {
     var body: some Scene {
         WindowGroup("Aire Audio") {
             MainView(model: Recorder.shared)
-                .frame(minWidth: 620, minHeight: 510)
+                .frame(minWidth: 400, minHeight: 350)
         }
+        .defaultSize(width: 460, height: 500)
         .windowStyle(.hiddenTitleBar)
         .commands {
             CommandGroup(replacing: .newItem) {}

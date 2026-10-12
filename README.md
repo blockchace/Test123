@@ -2,6 +2,10 @@
 
 Grabador nativo para MacBook Air con macOS 13 Ventura o posterior. Interfaz en español, audio del sistema, micrófono o ambos; controles flotantes y en la barra de menús; pausa/reanudación y exportación local a MP3 de 192 kbps. No graba vídeo ni envía audio a servidores.
 
+### Cambios de la versión 1.2
+
+Interfaz compacta para usarla junto a otras apps: ventana inicial de 460 × 500 puntos, tamaño mínimo de 400 × 350, márgenes reducidos, espectros más bajos y contador junto a los controles cuando hay espacio. El contenido mantiene desplazamiento vertical y los controles se reordenan si no caben. El botón **Guardar** detiene y guarda; **MP3** exporta una grabación. La captura y las pistas guardadas no cambian. La disposición visual necesita comprobación en macOS.
+
 ### Cambios de la versión 1.1
 
 - Selector de micrófono con nombres de dispositivos (integrado, USB, auriculares, etc.), actualización de la lista y recuerdo de la selección. Ahora la captura abre el dispositivo elegido mediante `AVCaptureSession`.
