@@ -26,6 +26,7 @@ struct Recording: Identifiable {
     let date: Date
     let duration: Double
     let tracks: [URL]
+    let transcriptURL: URL?
     var id: String { url.path }
 }
 
@@ -400,7 +401,7 @@ final class Recorder: NSObject, ObservableObject, SCStreamOutput, SCStreamDelega
                 return Double(f.length) / f.processingFormat.sampleRate
             }
             guard let duration = durations.max() else { return nil }
-            return Recording(url: folder, name: RecordingStore.displayName(in: folder), date: (try? folder.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date(), duration: duration, tracks: tracks)
+            return Recording(url: folder, name: RecordingStore.displayName(in: folder), date: (try? folder.resourceValues(forKeys: [.creationDateKey]).creationDate) ?? Date(), duration: duration, tracks: tracks, transcriptURL: RecordingStore.latestTranscript(in: folder))
         }.sorted { $0.date > $1.date }
     }
 

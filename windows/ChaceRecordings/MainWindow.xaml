@@ -1,0 +1,46 @@
+<Window x:Class="ChaceRecordings.MainWindow" xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" xmlns:local="clr-namespace:ChaceRecordings" Title="ChaceRecordings" Width="490" Height="640" MinWidth="420" MinHeight="380" Background="#202535" Foreground="White" FontFamily="Segoe UI" Closing="WindowClosing" Activated="WindowActivated">
+ <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+  <StackPanel Margin="14">
+   <DockPanel Margin="0,0,0,10">
+    <Button DockPanel.Dock="Right" Content="⚙ Ajustes" Click="SettingsClick"/>
+    <TextBlock Text="ChaceRecordings" FontSize="19" FontWeight="SemiBold" VerticalAlignment="Center"/>
+   </DockPanel>
+   <Border Background="#803B4055" CornerRadius="14" BorderBrush="#407B7D91" BorderThickness="1" Padding="10">
+    <StackPanel>
+     <ComboBox x:Name="SourceBox" SelectedIndex="0"><ComboBoxItem Content="Sistema y micrófono"/><ComboBoxItem Content="Solo sistema"/><ComboBoxItem Content="Solo micrófono"/></ComboBox>
+     <TextBlock Text="Micrófono" FontSize="11" Margin="3,5,0,0"/>
+     <DockPanel><Button DockPanel.Dock="Right" Content="↻" Click="RefreshDevicesClick"/><ComboBox x:Name="MicrophoneBox" DisplayMemberPath="FriendlyName"/></DockPanel>
+     <TextBlock Text="Salida del sistema que quieres grabar" FontSize="11" Margin="3,5,0,0"/>
+     <ComboBox x:Name="OutputBox" DisplayMemberPath="FriendlyName"/>
+     <TextBlock Text="Sistema" FontSize="11" Margin="3,8,0,0"/><local:Waveform x:Name="SystemWave" Height="32" Margin="3"/>
+     <TextBlock Text="Micrófono" FontSize="11" Margin="3,4,0,0"/><local:Waveform x:Name="MicWave" Height="32" Margin="3"/>
+     <DockPanel Margin="0,6,0,0">
+      <WrapPanel DockPanel.Dock="Right"><Button x:Name="RecordButton" Content="● Grabar" Click="RecordClick"/><Button x:Name="PauseButton" Content="Pausar" Click="PauseClick" IsEnabled="False"/><Button x:Name="StopButton" Content="Guardar" Click="StopClick" IsEnabled="False"/></WrapPanel>
+      <TextBlock x:Name="ClockText" Text="00:00:00" FontFamily="Consolas" FontSize="23" VerticalAlignment="Center"/>
+     </DockPanel>
+     <TextBlock x:Name="StateText" Text="Listo para grabar" FontSize="11" Margin="3"/>
+    </StackPanel>
+   </Border>
+   <DockPanel Margin="0,8"><Button DockPanel.Dock="Right" Content="Cambiar carpeta" Click="FolderClick"/><TextBlock x:Name="FolderText" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" FontSize="11"/></DockPanel>
+   <TextBlock Text="Tus grabaciones" FontWeight="SemiBold" Margin="3,4,0,6"/>
+   <TextBlock x:Name="JobText" TextWrapping="Wrap" Margin="3" FontSize="11"/>
+   <ListBox x:Name="RecordingList" Background="Transparent" BorderThickness="0" MaxHeight="320" ScrollViewer.HorizontalScrollBarVisibility="Disabled" ScrollViewer.VerticalScrollBarVisibility="Auto" VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling">
+    <ListBox.ItemContainerStyle><Style TargetType="ListBoxItem"><Setter Property="HorizontalContentAlignment" Value="Stretch"/><Setter Property="Padding" Value="0"/></Style></ListBox.ItemContainerStyle>
+    <ListBox.ItemTemplate><DataTemplate><Border Background="#603B4055" CornerRadius="10" Padding="8" Margin="0,3">
+     <StackPanel>
+      <TextBlock Text="{Binding Name}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+      <TextBlock Text="{Binding Details}" FontSize="11" Opacity=".7"/>
+      <WrapPanel>
+       <Button Content="▶" ToolTip="Reproducir / detener" Click="PlayClick" Tag="{Binding}"/>
+       <Button Content="Nombre" Click="RenameClick" Tag="{Binding}"/>
+       <Button Content="Carpeta" Click="RevealClick" Tag="{Binding}"/>
+       <Button Content="MP3" Click="ExportClick" Tag="{Binding}"/>
+       <Button Content="Transcribir" Click="TranscribeClick" Tag="{Binding}"/>
+       <Button Content="Abrir TXT" Click="OpenTranscriptClick" Tag="{Binding}"><Button.Style><Style TargetType="Button" BasedOn="{StaticResource {x:Type Button}}"><Style.Triggers><DataTrigger Binding="{Binding Transcript}" Value="{x:Null}"><Setter Property="IsEnabled" Value="False"/></DataTrigger></Style.Triggers></Style></Button.Style></Button>
+      </WrapPanel>
+     </StackPanel>
+    </Border></DataTemplate></ListBox.ItemTemplate>
+   </ListBox>
+  </StackPanel>
+ </ScrollViewer>
+</Window>

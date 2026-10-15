@@ -1,6 +1,16 @@
 import Foundation
 
 enum RecordingStore {
+    static func latestTranscript(in folder: URL) -> URL? {
+        let urls = (try? FileManager.default.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.contentModificationDateKey, .isRegularFileKey])) ?? []
+        return urls.filter { url in
+            url.pathExtension.lowercased() == "txt" && (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true
+        }.max { a, b in
+            let first = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let second = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return first < second
+        }
+    }
     struct Metadata: Codable { let name: String }
 
     static func displayName(in folder: URL) -> String {

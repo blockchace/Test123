@@ -1,10 +1,12 @@
 import SwiftUI
+import AppKit
 
 @MainActor struct MainView: View {
     @ObservedObject var model: Recorder
     @StateObject private var transcriber = Transcriber()
     @State private var settingsPresented = false
     @State private var transcriptionTarget: Recording?
+    @Environment(\.scenePhase) private var scenePhase
 
     var body: some View {
         ScrollView(.vertical, showsIndicators: true) {
@@ -108,6 +110,10 @@ import SwiftUI
                                         .disabled(model.busy || model.exporting || transcriber.busy)
                                     }
                                     Spacer(minLength: 0)
+                                    if let transcript = recording.transcriptURL {
+                                        Button("Abrir TXT") { NSWorkspace.shared.open(transcript) }
+                                            .controlSize(.small).help("Abrir la última transcripción guardada")
+                                    }
                                 }
                             }
                             .padding(8)
@@ -123,6 +129,8 @@ import SwiftUI
         }
         .background(GlassBackground().ignoresSafeArea())
         .scrollIndicators(.visible)
+        .onChange(of: transcriber.busy) { busy in if !busy && !model.busy { model.reload() } }
+        .onChange(of: scenePhase) { phase in if phase == .active && !model.busy { model.reload() } }
         .sheet(isPresented: $settingsPresented) {
             DeepgramSettingsView { transcriber.refreshKeyStatus() }
         }

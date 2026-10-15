@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <IsTestProject>true</IsTestProject>
+    <IsPackable>false</IsPackable>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
+    <PackageReference Include="NAudio.Core" Version="2.2.1" />
+    <PackageReference Include="NAudio.Wasapi" Version="2.2.1" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
+    <Compile Include="../ChaceRecordings/Storage.cs" Link="Storage.cs" />
+    <Compile Include="../ChaceRecordings/DeepgramProtocol.cs" Link="DeepgramProtocol.cs" />
+    <Compile Include="../ChaceRecordings/AudioFiles.cs" Link="AudioFiles.cs" />
+    <Compile Include="../ChaceRecordings/AudioRecorder.cs" Link="AudioRecorder.cs" />
+  </ItemGroup>
+</Project>

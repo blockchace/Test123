@@ -1,5 +1,15 @@
 # ChaceRecordings
 
+**Ahora también para Windows 11:** [guía y compilación de Windows](windows/README.md). El workflow **Crear instalador Windows 11** genera un instalador `.exe` y un ZIP portátil x64 con .NET incluido. La app de Mac conserva su instalador DMG independiente.
+
+### Abrir transcripciones existentes
+
+En Windows 2.0 y Mac 1.5, **Abrir TXT** aparece o se habilita cuando una grabación tiene una transcripción. Abre el TXT más reciente en la carpeta de esa grabación, también tras reiniciar la app. No envía audio ni consume créditos de Deepgram. Si deseas otro idioma o una transcripción nueva, sigue disponible **Transcribir**.
+
+### Verificación de Windows
+
+Se compiló la app WPF y se generó una carpeta de publicación `win-x64` autocontenida desde Linux. Las pruebas ejecutadas aquí cubren parámetros y respuesta de Deepgram, reapertura del TXT tras cargar la biblioteca, mezcla continua de pistas y rotación de WAV con relleno de silencio. Las pruebas de Media Foundation/MP3 y DPAPI se ejecutan en el workflow de Windows; en Linux se omiten explícitamente. Captura WASAPI con dispositivos reales, permisos, suspensión, apariencia, consumo real e instalación interactiva requieren validación en Windows 11. El instalador Inno Setup se genera en GitHub Actions, no se ha ejecutado en esta máquina Linux.
+
 Grabador nativo para MacBook Air con macOS 13 Ventura o posterior. Interfaz en español, audio del sistema, micrófono o ambos; controles flotantes y en la barra de menús; pausa/reanudación y exportación local a MP3 de 192 kbps. No graba vídeo ni envía audio a servidores.
 
 ### Cambios de la versión 1.4: transcripción con Deepgram
